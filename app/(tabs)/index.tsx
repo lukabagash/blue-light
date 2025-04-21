@@ -1,74 +1,166 @@
-import { Image, StyleSheet, Platform } from 'react-native';
+// app/(tabs)/HomeScreen.tsx
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
+import React, { useState } from 'react';
+import {
+  FlatList,
+  StyleSheet,
+  View,
+  TouchableOpacity,
+  useColorScheme,
+} from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+
+const BATCH_SIZE = 20;
+
+type Room = {
+  id: string;
+  roomNumber: number;
+  percentage: number;
+};
+
+function RoomItem({ roomNumber, percentage }: Omit<Room, 'id'>) {
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
+
+  // dynamic colors
+  const cardBg = isDark ? '#333' : '#fff';
+  const progressBg = isDark ? '#444' : '#eee';
+  const textColor = isDark ? '#fff' : '#000';
+  const buttonBg = isDark ? '#0A84FF' : '#007AFF';
+  const buttonText = isDark ? '#000' : '#fff';
+
+  // red if >50%, green otherwise (this stays the same)
+  const barColor = percentage > 50 ? 'red' : 'green';
+
+  return (
+    <View style={[styles.itemContainer, { backgroundColor: cardBg }]}>
+      {/* Header */}
+      <View style={styles.header}>
+        <ThemedText style={[styles.roomText, { color: textColor }]}>
+          Room {roomNumber}
+        </ThemedText>
+        <ThemedText style={[styles.percentageText, { color: textColor }]}>
+          {percentage}%
+        </ThemedText>
+      </View>
+
+      {/* Progress bar */}
+      <View style={[styles.progressBar, { backgroundColor: progressBg }]}>
+        <View
+          style={[
+            styles.progressFill,
+            { width: `${percentage}%`, backgroundColor: barColor },
+          ]}
+        />
+      </View>
+
+      {/* Buttons */}
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: buttonBg }]}
+        >
+          <ThemedText style={[styles.buttonText, { color: buttonText }]}>
+            In Use
+          </ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: buttonBg }]}
+        >
+          <ThemedText style={[styles.buttonText, { color: buttonText }]}>
+            T/O
+          </ThemedText>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
 
 export default function HomeScreen() {
+  const [rooms, setRooms] = useState<Room[]>(
+    Array.from({ length: BATCH_SIZE }, (_, i) => ({
+      id: `${i + 1}`,
+      roomNumber: i + 1,
+      percentage: Math.floor(Math.random() * 101),
+    }))
+  );
+
+  const loadMoreRooms = () => {
+    const nextIndex = rooms.length;
+    const newBatch = Array.from({ length: BATCH_SIZE }, (_, i) => ({
+      id: `${nextIndex + i + 1}`,
+      roomNumber: nextIndex + i + 1,
+      percentage: Math.floor(Math.random() * 101),
+    }));
+    setRooms((prev) => [...prev, ...newBatch]);
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+    <FlatList
+      data={rooms}
+      renderItem={({ item }) => (
+        <RoomItem
+          roomNumber={item.roomNumber}
+          percentage={item.percentage}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12'
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          Tap the Explore tab to learn more about what's included in this starter app.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run{' '}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      )}
+      keyExtractor={(item) => item.id}
+      onEndReached={loadMoreRooms}
+      onEndReachedThreshold={0.5}
+      contentContainerStyle={styles.listContainer}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  listContainer: {
+    padding: 16,
   },
-  stepContainer: {
-    gap: 8,
+  itemContainer: {
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+    // iOS shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    // Android elevation
+    elevation: 3,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  roomText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  percentageText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  progressBar: {
+    height: 10,
+    borderRadius: 5,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  button: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 4,
+    marginHorizontal: 4,
+  },
+  buttonText: {
+    fontWeight: 'bold',
   },
 });
