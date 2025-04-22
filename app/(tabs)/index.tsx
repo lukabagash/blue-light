@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { supabase } from '@/lib/supabase';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 
 type Room = {
   id: number;
@@ -28,6 +30,8 @@ export default function HomeScreen() {
   const [filterOptions, setFilterOptions] = useState<{ date: string; time: string | null }[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<{ date: string; time: string | null } | null>(null);
   const [filterVisible, setFilterVisible] = useState(false);
+  const insets = useSafeAreaInsets();
+
 
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
@@ -244,7 +248,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         )}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={[styles.listContainer, { paddingBottom: insets.bottom + 50 }]}
       />
     </View>
   );
