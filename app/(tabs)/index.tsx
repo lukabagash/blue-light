@@ -6,6 +6,7 @@ import {
   StyleSheet,
   View,
   TouchableOpacity,
+  ScrollView,
   useColorScheme,
   ActivityIndicator,
 } from 'react-native';
@@ -16,28 +17,63 @@ type Room = {
   id: number;
   room_name: string;
   predicted_probability: number;
+  date: string; // YYYY‑MM‑DD
 };
 
 export default function HomeScreen() {
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [dates, setDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>('All');
   const [loading, setLoading] = useState<boolean>(true);
 
-  const fetchRooms = useCallback(async () => {
-    setLoading(true);
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
+
+  const fetchDates = useCallback(async () => {
     const { data, error } = await supabase
-      .from<Room>('test_luka')
-      .select('id, room_name, predicted_probability');
+      .from('test_luka')
+      .select<{ date: string }>('date')
+      .order('date', { ascending: false });
     if (error) {
-      console.error('Error fetching rooms:', error);
-    } else {
-      setRooms(data ?? []);
+      console.error('Error fetching dates:', error);
+      return;
     }
-    setLoading(false);
+    // dedupe
+    const unique = Array.from(new Set(data.map((d) => d.date)));
+    setDates(unique);
   }, []);
 
+  const fetchRooms = useCallback(
+    async (dateFilter: string = 'All') => {
+      let query = supabase
+        .from('test_luka')
+        .select<Room>('id, room_name, predicted_probability, date');
+      if (dateFilter !== 'All') {
+        query = query.eq('date', dateFilter);
+      }
+      const { data, error } = await query.order('date', { ascending: false });
+      if (error) {
+        console.error('Error fetching rooms:', error);
+      } else {
+        setRooms(data ?? []);
+      }
+    },
+    []
+  );
+
+  // initial load: dates & all rooms
   useEffect(() => {
-    fetchRooms();
-  }, [fetchRooms]);
+    setLoading(true);
+    fetchDates()
+      .then(() => fetchRooms('All'))
+      .finally(() => setLoading(false));
+  }, [fetchDates, fetchRooms]);
+
+  const onSelectDate = (date: string) => {
+    setSelectedDate(date);
+    setLoading(true);
+    fetchRooms(date).finally(() => setLoading(false));
+  };
 
   if (loading) {
     return <ActivityIndicator style={styles.loader} />;
@@ -47,10 +83,57 @@ export default function HomeScreen() {
     <FlatList
       data={rooms}
       keyExtractor={(item) => item.id.toString()}
+      ListHeaderComponent={() => (
+        <View style={styles.filterContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterScroll}
+          >
+            {['All', ...dates].map((d) => {
+              const active = d === selectedDate;
+              return (
+                <TouchableOpacity
+                  key={d}
+                  style={[
+                    styles.filterButton,
+                    {
+                      backgroundColor: active
+                        ? isDark
+                          ? '#0A84FF'
+                          : '#007AFF'
+                        : isDark
+                        ? '#444'
+                        : '#eee',
+                    },
+                  ]}
+                  onPress={() => onSelectDate(d)}
+                >
+                  <ThemedText
+                    style={[
+                      styles.filterText,
+                      {
+                        color: active
+                          ? isDark
+                            ? '#000'
+                            : '#fff'
+                          : isDark
+                          ? '#fff'
+                          : '#000',
+                      },
+                    ]}
+                  >
+                    {d}
+                  </ThemedText>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
       renderItem={({ item }) => (
         <RoomItem
           roomName={item.room_name}
-          // convert 0–1 probability to 0–100 integer
           probability={Math.round(item.predicted_probability * 100)}
         />
       )}
@@ -67,19 +150,16 @@ function RoomItem({ roomName, probability }: RoomItemProps) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
 
-  // dynamic colors
   const cardBg = isDark ? '#333' : '#fff';
   const progressBg = isDark ? '#444' : '#eee';
   const textColor = isDark ? '#fff' : '#000';
   const buttonBg = isDark ? '#0A84FF' : '#007AFF';
   const buttonTextColor = isDark ? '#000' : '#fff';
 
-  // red if >50%, green otherwise
   const barColor = probability > 50 ? 'red' : 'green';
 
   return (
     <View style={[styles.itemContainer, { backgroundColor: cardBg }]}>
-      {/* Header */}
       <View style={styles.header}>
         <ThemedText style={[styles.roomText, { color: textColor }]}>
           {roomName}
@@ -89,7 +169,6 @@ function RoomItem({ roomName, probability }: RoomItemProps) {
         </ThemedText>
       </View>
 
-      {/* Progress bar */}
       <View style={[styles.progressBar, { backgroundColor: progressBg }]}>
         <View
           style={[
@@ -99,7 +178,6 @@ function RoomItem({ roomName, probability }: RoomItemProps) {
         />
       </View>
 
-      {/* Buttons */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={[styles.button, { backgroundColor: buttonBg }]}>
           <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>
@@ -124,16 +202,30 @@ const styles = StyleSheet.create({
   listContainer: {
     padding: 16,
   },
+  filterContainer: {
+    paddingVertical: 8,
+  },
+  filterScroll: {
+    paddingHorizontal: 16,
+  },
+  filterButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  filterText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
   itemContainer: {
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
-    // iOS shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    // Android elevation
     elevation: 3,
   },
   header: {
