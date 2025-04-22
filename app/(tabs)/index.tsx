@@ -1,24 +1,69 @@
 // app/(tabs)/HomeScreen.tsx
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   FlatList,
   StyleSheet,
   View,
   TouchableOpacity,
   useColorScheme,
+  ActivityIndicator,
 } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
-
-const BATCH_SIZE = 20;
+import { supabase } from '@/lib/supabase';
 
 type Room = {
-  id: string;
-  roomNumber: number;
-  percentage: number;
+  id: number;
+  room_name: string;
+  predicted_probability: number;
 };
 
-function RoomItem({ roomNumber, percentage }: Omit<Room, 'id'>) {
+export default function HomeScreen() {
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const fetchRooms = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from<Room>('test_luka')
+      .select('id, room_name, predicted_probability');
+    if (error) {
+      console.error('Error fetching rooms:', error);
+    } else {
+      setRooms(data ?? []);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchRooms();
+  }, [fetchRooms]);
+
+  if (loading) {
+    return <ActivityIndicator style={styles.loader} />;
+  }
+
+  return (
+    <FlatList
+      data={rooms}
+      keyExtractor={(item) => item.id.toString()}
+      renderItem={({ item }) => (
+        <RoomItem
+          roomName={item.room_name}
+          // convert 0–1 probability to 0–100 integer
+          probability={Math.round(item.predicted_probability * 100)}
+        />
+      )}
+      contentContainerStyle={styles.listContainer}
+    />
+  );
+}
+
+type RoomItemProps = {
+  roomName: string;
+  probability: number;
+};
+function RoomItem({ roomName, probability }: RoomItemProps) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
 
@@ -27,20 +72,20 @@ function RoomItem({ roomNumber, percentage }: Omit<Room, 'id'>) {
   const progressBg = isDark ? '#444' : '#eee';
   const textColor = isDark ? '#fff' : '#000';
   const buttonBg = isDark ? '#0A84FF' : '#007AFF';
-  const buttonText = isDark ? '#000' : '#fff';
+  const buttonTextColor = isDark ? '#000' : '#fff';
 
-  // red if >50%, green otherwise (this stays the same)
-  const barColor = percentage > 50 ? 'red' : 'green';
+  // red if >50%, green otherwise
+  const barColor = probability > 50 ? 'red' : 'green';
 
   return (
     <View style={[styles.itemContainer, { backgroundColor: cardBg }]}>
       {/* Header */}
       <View style={styles.header}>
         <ThemedText style={[styles.roomText, { color: textColor }]}>
-          Room {roomNumber}
+          {roomName}
         </ThemedText>
         <ThemedText style={[styles.percentageText, { color: textColor }]}>
-          {percentage}%
+          {probability}%
         </ThemedText>
       </View>
 
@@ -49,24 +94,20 @@ function RoomItem({ roomNumber, percentage }: Omit<Room, 'id'>) {
         <View
           style={[
             styles.progressFill,
-            { width: `${percentage}%`, backgroundColor: barColor },
+            { width: `${probability}%`, backgroundColor: barColor },
           ]}
         />
       </View>
 
       {/* Buttons */}
       <View style={styles.buttonContainer}>
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: buttonBg }]}
-        >
-          <ThemedText style={[styles.buttonText, { color: buttonText }]}>
+        <TouchableOpacity style={[styles.button, { backgroundColor: buttonBg }]}>
+          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>
             In Use
           </ThemedText>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: buttonBg }]}
-        >
-          <ThemedText style={[styles.buttonText, { color: buttonText }]}>
+        <TouchableOpacity style={[styles.button, { backgroundColor: buttonBg }]}>
+          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>
             T/O
           </ThemedText>
         </TouchableOpacity>
@@ -75,43 +116,11 @@ function RoomItem({ roomNumber, percentage }: Omit<Room, 'id'>) {
   );
 }
 
-export default function HomeScreen() {
-  const [rooms, setRooms] = useState<Room[]>(
-    Array.from({ length: BATCH_SIZE }, (_, i) => ({
-      id: `${i + 1}`,
-      roomNumber: i + 1,
-      percentage: Math.floor(Math.random() * 101),
-    }))
-  );
-
-  const loadMoreRooms = () => {
-    const nextIndex = rooms.length;
-    const newBatch = Array.from({ length: BATCH_SIZE }, (_, i) => ({
-      id: `${nextIndex + i + 1}`,
-      roomNumber: nextIndex + i + 1,
-      percentage: Math.floor(Math.random() * 101),
-    }));
-    setRooms((prev) => [...prev, ...newBatch]);
-  };
-
-  return (
-    <FlatList
-      data={rooms}
-      renderItem={({ item }) => (
-        <RoomItem
-          roomNumber={item.roomNumber}
-          percentage={item.percentage}
-        />
-      )}
-      keyExtractor={(item) => item.id}
-      onEndReached={loadMoreRooms}
-      onEndReachedThreshold={0.5}
-      contentContainerStyle={styles.listContainer}
-    />
-  );
-}
-
 const styles = StyleSheet.create({
+  loader: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   listContainer: {
     padding: 16,
   },
