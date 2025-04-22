@@ -2,14 +2,15 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
+  View,
+  Text,
   FlatList,
   StyleSheet,
-  View,
   TouchableOpacity,
-  ScrollView,
-  useColorScheme,
   ActivityIndicator,
-  Text,
+  useColorScheme,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { supabase } from '@/lib/supabase';
@@ -18,82 +19,111 @@ type Room = {
   id: number;
   room_name: string;
   predicted_probability: number;
-  date: string; // YYYY‑MM‑DD
+  date: string;           // YYYY‑MM‑DD
+  time: string | null;    // HH:MM:SS
 };
 
 export default function HomeScreen() {
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [dates, setDates] = useState<string[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string>('All');
-  const [loading, setLoading] = useState<boolean>(true);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [filterOptions, setFilterOptions] = useState<{ date: string; time: string | null }[]>([]);
+  const [selectedFilter, setSelectedFilter] = useState<{ date: string; time: string | null } | null>(null);
+  const [filterVisible, setFilterVisible] = useState(false);
+
+  const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const [sortDescending, setSortDescending] = useState<boolean>(false);
+
+  const [sortDescending, setSortDescending] = useState(false);
 
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
 
+  // derive pagination
   const totalPages = Math.ceil(rooms.length / itemsPerPage);
   const paginatedRooms = rooms.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
-  const fetchDates = useCallback(async () => {
+  // 1) fetch all distinct (date, time) combos
+  const fetchFilterOptions = useCallback(async () => {
     const { data, error } = await supabase
       .from('test_luka')
-      .select('date')
-      .order('date', { ascending: false });
+      .select('date, time')
+      .order('date', { ascending: false })
+      .order('time', { ascending: false });
+
     if (error) {
-      console.error('Error fetching dates:', error);
+      console.error('Error fetching filter options:', error);
       return;
     }
-    const unique = Array.from(new Set(data.map((d) => d.date)));
-    setDates(unique);
+    const seen = new Set<string>();
+    const combos: { date: string; time: string | null }[] = [];
+    data.forEach(d => {
+      const key = `${d.date} ${d.time ?? ''}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        combos.push({ date: d.date, time: d.time });
+      }
+    });
+    setFilterOptions(combos);
   }, []);
 
+  // 2) fetch rooms, optionally filtering by date & time
   const fetchRooms = useCallback(
-    async (dateFilter: string = 'All') => {
+    async (dateFilter?: string, timeFilter?: string | null) => {
       let query = supabase
         .from('test_luka')
-        .select('id, room_name, predicted_probability, date');
-      if (dateFilter !== 'All') {
-        query = query.eq('date', dateFilter);
-      }
-      const { data, error } = await query.order('date', { ascending: false });
+        .select('id, room_name, predicted_probability, date, time');
+
+      if (dateFilter)  query = query.eq('date', dateFilter);
+      if (timeFilter)  query = query.eq('time', timeFilter);
+
+      const { data, error } = await query
+        .order('date', { ascending: false })
+        .order('time', { ascending: false });
+
       if (error) {
         console.error('Error fetching rooms:', error);
       } else {
-        let result = data ?? [];
-        // apply current sort order
-        result = result.sort((a, b) =>
+        const list = (data || []) as Room[];
+        // apply sort
+        list.sort((a, b) =>
           sortDescending
             ? b.predicted_probability - a.predicted_probability
             : a.predicted_probability - b.predicted_probability
         );
-        setRooms(result);
+        setRooms(list);
       }
     },
     [sortDescending]
   );
 
+  // initial load: filter options + all rooms
   useEffect(() => {
     setLoading(true);
-    fetchDates()
-      .then(() => fetchRooms('All'))
+    Promise.all([fetchFilterOptions(), fetchRooms()])
       .finally(() => setLoading(false));
-  }, [fetchDates, fetchRooms]);
+  }, [fetchFilterOptions, fetchRooms]);
 
-  const onSelectDate = (date: string) => {
-    setSelectedDate(date);
+  // apply a (date,time) filter or clear it
+  const applyFilter = (f: { date: string; time: string | null } | null) => {
+    setSelectedFilter(f);
     setCurrentPage(1);
+    setFilterVisible(false);
     setLoading(true);
-    fetchRooms(date).finally(() => setLoading(false));
+    if (f) {
+      fetchRooms(f.date, f.time).finally(() => setLoading(false));
+    } else {
+      fetchRooms().finally(() => setLoading(false));
+    }
   };
 
+  // toggle sort order
   const toggleSort = () => {
-    setSortDescending((prev) => !prev);
+    setSortDescending((s) => !s);
     setCurrentPage(1);
+    // re-sort current rooms immediately
     setRooms((prev) =>
       [...prev].sort((a, b) =>
         !sortDescending
@@ -103,112 +133,123 @@ export default function HomeScreen() {
     );
   };
 
-  const onPrevPage = () => {
-    if (currentPage > 1) setCurrentPage((p) => p - 1);
-  };
-  const onNextPage = () => {
-    if (currentPage < totalPages) setCurrentPage((p) => p + 1);
-  };
+  // pagination handlers
+  const onPrevPage = () => currentPage > 1 && setCurrentPage((p) => p - 1);
+  const onNextPage = () => currentPage < totalPages && setCurrentPage((p) => p + 1);
 
   if (loading) {
     return <ActivityIndicator style={styles.loader} />;
   }
 
   return (
-    <FlatList
-      data={paginatedRooms}
-      keyExtractor={(item) => item.id.toString()}
-      ListHeaderComponent={() => (
-        <View style={styles.headerTop}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterScroll}
-          >
-            {['All', ...dates].map((d) => {
-              const active = d === selectedDate;
-              return (
-                <TouchableOpacity
-                  key={d}
-                  style={[
-                    styles.filterButton,
-                    {
-                      backgroundColor: active
-                        ? isDark
-                          ? '#0A84FF'
-                          : '#007AFF'
-                        : isDark
-                        ? '#444'
-                        : '#eee',
-                    },
-                  ]}
-                  onPress={() => onSelectDate(d)}
-                >
-                  <ThemedText
+    <View style={{ flex: 1 }}>
+      {/** Filter Modal **/}
+      <Modal visible={filterVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: isDark ? '#333' : '#fff' }]}>
+            <ScrollView>
+              <TouchableOpacity
+                style={styles.modalOption}
+                onPress={() => applyFilter(null)}
+              >
+                <Text style={[styles.modalOptionText, { color: isDark ? '#fff' : '#000' }]}>
+                  All
+                </Text>
+              </TouchableOpacity>
+              {filterOptions.map(opt => {
+                const label = `${opt.date}${opt.time ? ' ' + opt.time : ''}`;
+                const active =
+                  selectedFilter?.date === opt.date &&
+                  selectedFilter?.time === opt.time;
+                return (
+                  <TouchableOpacity
+                    key={label}
                     style={[
-                      styles.filterText,
-                      {
-                        color: active
-                          ? isDark
-                            ? '#000'
-                            : '#fff'
-                          : isDark
-                          ? '#fff'
-                          : '#000',
-                      },
+                      styles.modalOption,
+                      active && { backgroundColor: isDark ? '#555' : '#eee' },
                     ]}
+                    onPress={() => applyFilter(opt)}
                   >
-                    {d}
-                  </ThemedText>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          <TouchableOpacity
-            style={[styles.sortButton, { backgroundColor: isDark ? '#444' : '#eee' }]}
-            onPress={toggleSort}
-          >
-            <ThemedText style={[styles.sortButtonText, { color: isDark ? '#fff' : '#000' }]}>
-              Sort {sortDescending ? '↓' : '↑'}
+                    <Text style={[styles.modalOptionText, { color: isDark ? '#fff' : '#000' }]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity
+              onPress={() => setFilterVisible(false)}
+              style={styles.modalClose}
+            >
+              <Text style={{ color: isDark ? '#fff' : '#000' }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/** Main List **/}
+      <FlatList
+        data={paginatedRooms}
+        keyExtractor={i => i.id.toString()}
+        ListHeaderComponent={() => (
+          <View style={styles.headerTop}>
+            <TouchableOpacity
+              style={[styles.filterButtonHeader, { backgroundColor: isDark ? '#444' : '#eee' }]}
+              onPress={() => setFilterVisible(true)}
+            >
+              <ThemedText style={{ color: isDark ? '#fff' : '#000' }}>
+                {selectedFilter
+                  ? `${selectedFilter.date}${selectedFilter.time ? ' ' + selectedFilter.time : ''}`
+                  : 'Filter'}
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortButton, { backgroundColor: isDark ? '#444' : '#eee' }]}
+              onPress={toggleSort}
+            >
+              <ThemedText style={[styles.sortButtonText, { color: isDark ? '#fff' : '#000' }]}>
+                Sort {sortDescending ? '↓' : '↑'}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
+        renderItem={({ item }) => (
+          <RoomItem
+            roomName={item.room_name}
+            probability={Math.round(item.predicted_probability * 100)}
+          />
+        )}
+        ListFooterComponent={() => (
+          <View style={styles.paginationContainer}>
+            <TouchableOpacity
+              disabled={currentPage === 1}
+              onPress={onPrevPage}
+              style={[styles.pageButton, currentPage === 1 && styles.disabledButton]}
+            >
+              <Text style={currentPage === 1 ? styles.disabledText : styles.pageButtonText}>
+                Previous
+              </Text>
+            </TouchableOpacity>
+            <ThemedText style={styles.pageInfo}>
+              {currentPage} / {totalPages}
             </ThemedText>
-          </TouchableOpacity>
-        </View>
-      )}
-      renderItem={({ item }) => (
-        <RoomItem
-          roomName={item.room_name}
-          probability={Math.round(item.predicted_probability * 100)}
-        />
-      )}
-      ListFooterComponent={() => (
-        <View style={styles.paginationContainer}>
-          <TouchableOpacity
-            disabled={currentPage === 1}
-            onPress={onPrevPage}
-            style={[styles.pageButton, currentPage === 1 && styles.disabledButton]}
-          >
-            <Text style={currentPage === 1 ? styles.disabledText : styles.pageButtonText}>
-              Previous
-            </Text>
-          </TouchableOpacity>
-          <ThemedText style={styles.pageInfo}>
-            {currentPage} / {totalPages}
-          </ThemedText>
-          <TouchableOpacity
-            disabled={currentPage === totalPages}
-            onPress={onNextPage}
-            style={[styles.pageButton, currentPage === totalPages && styles.disabledButton]}
-          >
-            <Text style={currentPage === totalPages ? styles.disabledText : styles.pageButtonText}>
-              Next
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      contentContainerStyle={styles.listContainer}
-    />
+            <TouchableOpacity
+              disabled={currentPage === totalPages}
+              onPress={onNextPage}
+              style={[styles.pageButton, currentPage === totalPages && styles.disabledButton]}
+            >
+              <Text style={currentPage === totalPages ? styles.disabledText : styles.pageButtonText}>
+                Next
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        contentContainerStyle={styles.listContainer}
+      />
+    </View>
   );
 }
+
 
 type RoomItemProps = {
   roomName: string;
@@ -244,10 +285,14 @@ function RoomItem({ roomName, probability }: RoomItemProps) {
       </View>
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={[styles.button, { backgroundColor: buttonBg }]}>
-          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>In Use</ThemedText>
+          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>
+            In Use
+          </ThemedText>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.button, { backgroundColor: buttonBg }]}>
-          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>T/O</ThemedText>
+          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>
+            T/O
+          </ThemedText>
         </TouchableOpacity>
       </View>
     </View>
@@ -266,22 +311,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    padding: 16,
   },
-  filterScroll: {
-    flexGrow: 1,
-    paddingRight: 8,
-  },
-  filterButton: {
+  filterButtonHeader: {
     paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  filterText: {
-    fontSize: 14,
-    fontWeight: '500',
+    borderRadius: 4,
   },
   sortButton: {
     padding: 6,
@@ -363,5 +398,29 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '80%',
+    maxHeight: '70%',
+    borderRadius: 8,
+    padding: 16,
+  },
+  modalOption: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
+  },
+  modalOptionText: {
+    fontSize: 16,
+  },
+  modalClose: {
+    marginTop: 12,
+    alignSelf: 'flex-end',
   },
 });
