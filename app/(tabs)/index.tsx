@@ -31,8 +31,10 @@ export default function HomeScreen() {
 
   const fetchDates = useCallback(async () => {
     const { data, error } = await supabase
+      // tell Supabase that each row has shape { date: string }
       .from('test_luka')
-      .select<{ date: string }>('date')
+      // now select by column names only
+      .select('date')
       .order('date', { ascending: false });
     if (error) {
       console.error('Error fetching dates:', error);
@@ -47,7 +49,7 @@ export default function HomeScreen() {
     async (dateFilter: string = 'All') => {
       let query = supabase
         .from('test_luka')
-        .select<Room>('id, room_name, predicted_probability, date');
+        .select('id, room_name, predicted_probability, date');
       if (dateFilter !== 'All') {
         query = query.eq('date', dateFilter);
       }
