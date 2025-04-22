@@ -9,6 +9,7 @@ import {
   ScrollView,
   useColorScheme,
   ActivityIndicator,
+  Text,
 } from 'react-native';
 import { ThemedText } from '@/components/ThemedText';
 import { supabase } from '@/lib/supabase';
@@ -25,22 +26,28 @@ export default function HomeScreen() {
   const [dates, setDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('All');
   const [loading, setLoading] = useState<boolean>(true);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 10;
+  const [sortDescending, setSortDescending] = useState<boolean>(false);
 
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
 
+  const totalPages = Math.ceil(rooms.length / itemsPerPage);
+  const paginatedRooms = rooms.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const fetchDates = useCallback(async () => {
     const { data, error } = await supabase
-      // tell Supabase that each row has shape { date: string }
       .from('test_luka')
-      // now select by column names only
       .select('date')
       .order('date', { ascending: false });
     if (error) {
       console.error('Error fetching dates:', error);
       return;
     }
-    // dedupe
     const unique = Array.from(new Set(data.map((d) => d.date)));
     setDates(unique);
   }, []);
@@ -57,13 +64,19 @@ export default function HomeScreen() {
       if (error) {
         console.error('Error fetching rooms:', error);
       } else {
-        setRooms(data ?? []);
+        let result = data ?? [];
+        // apply current sort order
+        result = result.sort((a, b) =>
+          sortDescending
+            ? b.predicted_probability - a.predicted_probability
+            : a.predicted_probability - b.predicted_probability
+        );
+        setRooms(result);
       }
     },
-    []
+    [sortDescending]
   );
 
-  // initial load: dates & all rooms
   useEffect(() => {
     setLoading(true);
     fetchDates()
@@ -73,8 +86,28 @@ export default function HomeScreen() {
 
   const onSelectDate = (date: string) => {
     setSelectedDate(date);
+    setCurrentPage(1);
     setLoading(true);
     fetchRooms(date).finally(() => setLoading(false));
+  };
+
+  const toggleSort = () => {
+    setSortDescending((prev) => !prev);
+    setCurrentPage(1);
+    setRooms((prev) =>
+      [...prev].sort((a, b) =>
+        !sortDescending
+          ? b.predicted_probability - a.predicted_probability
+          : a.predicted_probability - b.predicted_probability
+      )
+    );
+  };
+
+  const onPrevPage = () => {
+    if (currentPage > 1) setCurrentPage((p) => p - 1);
+  };
+  const onNextPage = () => {
+    if (currentPage < totalPages) setCurrentPage((p) => p + 1);
   };
 
   if (loading) {
@@ -83,10 +116,10 @@ export default function HomeScreen() {
 
   return (
     <FlatList
-      data={rooms}
+      data={paginatedRooms}
       keyExtractor={(item) => item.id.toString()}
       ListHeaderComponent={() => (
-        <View style={styles.filterContainer}>
+        <View style={styles.headerTop}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -131,6 +164,14 @@ export default function HomeScreen() {
               );
             })}
           </ScrollView>
+          <TouchableOpacity
+            style={[styles.sortButton, { backgroundColor: isDark ? '#444' : '#eee' }]}
+            onPress={toggleSort}
+          >
+            <ThemedText style={[styles.sortButtonText, { color: isDark ? '#fff' : '#000' }]}>
+              Sort {sortDescending ? '↓' : '↑'}
+            </ThemedText>
+          </TouchableOpacity>
         </View>
       )}
       renderItem={({ item }) => (
@@ -138,6 +179,31 @@ export default function HomeScreen() {
           roomName={item.room_name}
           probability={Math.round(item.predicted_probability * 100)}
         />
+      )}
+      ListFooterComponent={() => (
+        <View style={styles.paginationContainer}>
+          <TouchableOpacity
+            disabled={currentPage === 1}
+            onPress={onPrevPage}
+            style={[styles.pageButton, currentPage === 1 && styles.disabledButton]}
+          >
+            <Text style={currentPage === 1 ? styles.disabledText : styles.pageButtonText}>
+              Previous
+            </Text>
+          </TouchableOpacity>
+          <ThemedText style={styles.pageInfo}>
+            {currentPage} / {totalPages}
+          </ThemedText>
+          <TouchableOpacity
+            disabled={currentPage === totalPages}
+            onPress={onNextPage}
+            style={[styles.pageButton, currentPage === totalPages && styles.disabledButton]}
+          >
+            <Text style={currentPage === totalPages ? styles.disabledText : styles.pageButtonText}>
+              Next
+            </Text>
+          </TouchableOpacity>
+        </View>
       )}
       contentContainerStyle={styles.listContainer}
     />
@@ -163,14 +229,11 @@ function RoomItem({ roomName, probability }: RoomItemProps) {
   return (
     <View style={[styles.itemContainer, { backgroundColor: cardBg }]}>
       <View style={styles.header}>
-        <ThemedText style={[styles.roomText, { color: textColor }]}>
-          {roomName}
-        </ThemedText>
+        <ThemedText style={[styles.roomText, { color: textColor }]}>{roomName}</ThemedText>
         <ThemedText style={[styles.percentageText, { color: textColor }]}>
           {probability}%
         </ThemedText>
       </View>
-
       <View style={[styles.progressBar, { backgroundColor: progressBg }]}>
         <View
           style={[
@@ -179,17 +242,12 @@ function RoomItem({ roomName, probability }: RoomItemProps) {
           ]}
         />
       </View>
-
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={[styles.button, { backgroundColor: buttonBg }]}>
-          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>
-            In Use
-          </ThemedText>
+          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>In Use</ThemedText>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.button, { backgroundColor: buttonBg }]}>
-          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>
-            T/O
-          </ThemedText>
+          <ThemedText style={[styles.buttonText, { color: buttonTextColor }]}>T/O</ThemedText>
         </TouchableOpacity>
       </View>
     </View>
@@ -204,11 +262,16 @@ const styles = StyleSheet.create({
   listContainer: {
     padding: 16,
   },
-  filterContainer: {
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
     paddingVertical: 8,
   },
   filterScroll: {
-    paddingHorizontal: 16,
+    flexGrow: 1,
+    paddingRight: 8,
   },
   filterButton: {
     paddingVertical: 6,
@@ -217,6 +280,41 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   filterText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  sortButton: {
+    padding: 6,
+    borderRadius: 4,
+  },
+  sortButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  pageButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginHorizontal: 8,
+    borderRadius: 4,
+    backgroundColor: '#007AFF',
+  },
+  pageButtonText: {
+    color: '#fff',
+    fontWeight: '500',
+  },
+  disabledButton: {
+    backgroundColor: '#ccc',
+  },
+  disabledText: {
+    color: '#777',
+  },
+  pageInfo: {
     fontSize: 14,
     fontWeight: '500',
   },
